@@ -1221,7 +1221,10 @@ const delay      = ms => new Promise(r => setTimeout(r, ms));
 const pickRandom = arr => arr[Math.floor(Math.random() * arr.length)];
 
 // ── BOOT ──────────────────────────────────────────────────
-initDiscovery(); show('state-discovery');
+document.addEventListener('DOMContentLoaded', () => {
+  initDiscovery();
+  show('state-discovery');
+});
 </script>
 </body>
 </html>
