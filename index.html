@@ -359,12 +359,12 @@ import { HandLandmarker, FilesetResolver } from
 
 // ── HELPERS ──────────────────────────────────────────────
 const $ = id => document.getElementById(id);
-const STATES = ['state-gate','state-discovery','state-transition','state-cooking','state-done','state-pantry'];
+const STATES = ['state-discovery','state-transition','state-cooking','state-done','state-pantry'];
 
 function show(id) {
   STATES.forEach(s => { $(s).style.display = 'none'; });
   const el = $(id);
-  const center = id === 'state-gate' || id === 'state-transition';
+  const center = id === 'state-transition';
   el.style.display = 'flex';
   el.style.flexDirection = 'column';
   if (center) { el.style.alignItems = 'center'; el.style.justifyContent = 'center'; }
