@@ -90,6 +90,39 @@
       padding:2.25rem 2.75rem; text-align:center; max-width:340px;
     }
 
+    /* ── Timer overlay ── */
+    #pf-timer {
+      position: fixed; bottom: 14rem; left: 1.5rem;
+      background: rgba(15,23,42,0.92); backdrop-filter: blur(6px);
+      color: #fff; border-radius: 14px; padding: .75rem 1.25rem;
+      font-family: system-ui, sans-serif; min-width: 160px;
+      border: 1px solid rgba(99,132,255,0.4);
+      display: none; flex-direction: column; gap: .25rem;
+      z-index: 999;
+    }
+    #pf-timer.active { display: flex; }
+    #pf-timer-label { font-size: .7rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .08em; color: #94a3b8; }
+    #pf-timer-queue { font-size: .7rem; color: #64748b; margin-top: 2px; }
+    #pf-timer-time  { font-size: 2.2rem; font-weight: 700; letter-spacing: .04em;
+      line-height: 1; font-variant-numeric: tabular-nums; }
+    #pf-timer-time.urgent { color: #f87171; animation: timerPulse .6s infinite; }
+    #pf-timer-badge { font-size: .75rem; color: #a5b4fc; }
+    @keyframes timerPulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+    /* ── Timer indicator on step ── */
+    .step-timer-badge {
+      display: inline-flex; align-items: center; gap: .3rem;
+      font-size: .75rem; font-weight: 600; color: #2563eb;
+      background: #eff6ff; border: 1px solid #bfdbfe;
+      border-radius: 20px; padding: 2px 10px; margin-top: .4rem;
+    }
+
+    /* ── Palm hint in gesture hint box ── */
+    #pf-palm-hint { margin-top: .5rem; padding-top: .5rem;
+      border-top: 1px solid #e2e8f0; font-size: .85rem; color: #64748b; }
+
+    /* ── Gesture label ── */
     /* ── Gesture label ── */
     .gesture-label {
       position:fixed; bottom:13.5rem; right:1.5rem; width:220px;
@@ -336,6 +369,13 @@
 </div>
 
 <!-- GESTURE HINT -->
+<div id="pf-timer">
+  <div id="pf-timer-label">⏱ Timer</div>
+  <div id="pf-timer-time">0:00</div>
+  <div id="pf-timer-queue"></div>
+  <div id="pf-timer-badge">🖐 Palm to start next</div>
+</div>
+
 <div id="pf-gesture-hint">
   <div id="pf-gesture-hint-box">
     <div style="font-size:2.5rem;margin-bottom:.75rem;">✋</div>
@@ -344,6 +384,7 @@
       <div>👇 <strong style="color:#0f172a;">Point finger down</strong> — next step</div>
       <div>☝️ <strong style="color:#0f172a;">Point finger up</strong> — previous step</div>
       <div>👍 <strong style="color:#0f172a;">Thumbs up (hold 1s)</strong> — save recipe</div>
+      <div id="pf-palm-hint" style="display:none;">🖐 <strong style="color:#0f172a;">Open palm (hold .8s)</strong> — start timer</div>
     </div>
     <p style="font-size:.73rem;color:#9ca3af;margin:.85rem 0 0;">(tap anywhere to close)</p>
   </div>
@@ -402,6 +443,14 @@ let thumbsSaved = false;
 let pointUpStart   = null;
 let pointDownStart = null;
 let doneMacroWatcher = null;
+
+// ── TIMER STATE ──
+let stepTimers      = [];   // sorted array of {seconds, label} for current step
+let timerQueueIdx   = 0;    // which timer in the queue is next
+let timerRemaining  = 0;    // seconds remaining on active timer
+let timerInterval   = null; // setInterval reference
+let timerActive     = false;
+let palmHoldStart   = null; // for open-palm gesture
 const frameBuf = [];
 
 // ── CHAT UI ───────────────────────────────────────────────
@@ -949,10 +998,35 @@ function startGestureLoop() {
         if (lbl.textContent.startsWith('👍')) lbl.textContent = '';
       }
 
+      // ── OPEN PALM: all 5 fingers extended (start next timer) ──
+      if (stepTimers.length > 0 && !timerActive && timerQueueIdx < stepTimers.length) {
+        const allExtended =
+          lm[8].y  < lm[5].y  - 0.06 &&
+          lm[12].y < lm[9].y  - 0.06 &&
+          lm[16].y < lm[13].y - 0.06 &&
+          lm[20].y < lm[17].y - 0.06 &&
+          lm[4].x  < lm[3].x  - 0.04; // thumb spread
+        if (allExtended && !debouncing) {
+          if (!palmHoldStart) {
+            palmHoldStart = now;
+            lbl.textContent = '🖐 Hold to start timer…';
+          } else if (now - palmHoldStart > 800) {
+            lbl.textContent = '🖐 Timer started!';
+            startNextTimer();
+            palmHoldStart = null;
+            triggerDebounce(1000);
+          }
+        } else if (!allExtended) {
+          palmHoldStart = null;
+          if (lbl.textContent.startsWith('🖐')) lbl.textContent = '';
+        }
+      }
+
     } else {
       thumbsHoldStart = null;
       pointUpStart = null;
       pointDownStart = null;
+      palmHoldStart = null;
       if (lbl.textContent !== '') lbl.textContent = '';
     }
 
@@ -1005,12 +1079,24 @@ function parseIngredientList(meal) {
 
 function parseSteps(raw) {
   if (!raw) return ['No instructions provided.'];
+
+  // Try numbered lines first (e.g. "1. Add chicken")
   const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   const numbered = lines.filter(l => /^\d+[\.\)]/.test(l));
   if (numbered.length >= 3) return numbered.map(l => l.replace(/^\d+[\.\)]\s*/, ''));
-  const sentences = raw.replace(/\r\n|\r/g, ' ')
+
+  // Try splitting on sentence-ending punctuation
+  const byPunct = raw.replace(/\r\n|\r/g, ' ')
     .split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(s => s.length > 15);
-  return sentences.length >= 2 ? sentences : [raw.trim()];
+  if (byPunct.length >= 2) return byPunct;
+
+  // Handle run-on text (no punctuation) — split before cooking action verbs
+  const VERBS = '(?:Add|Cover|Bring|Simmer|Boil|Strain|Bone|Slice|Return|Cook|Bake|Fry|Stir|Mix|Pour|Place|Put|Remove|Transfer|Season|Heat|Let|Set|Allow|Serve|Top|Combine|Drain|Rinse|Chop|Dice|Mince|Peel|Grate|Whisk|Beat|Fold|Marinate|Soak|Roast|Grill|Steam|Reduce|Blend|Spread|Arrange|Garnish|Check|Rest|Cool|Prepare|Make|Cut|Break|Measure|Toss|Coat|Brush|Drizzle|Squeeze|Press|Roll|Wrap|Shape|Form|Knead|Flip|Baste|Thicken|Skim|If|My|The)';
+  const runOnRe = new RegExp('(?<=[a-z])\\s+(?=' + VERBS + '\\b)', 'g');
+  const byVerb = raw.trim().split(runOnRe).map(s => s.trim()).filter(s => s.length > 10);
+  if (byVerb.length >= 2) return byVerb;
+
+  return [raw.trim()];
 }
 
 function renderCookingMode(meal) {
@@ -1044,6 +1130,175 @@ function renderSteps() {
     </div>`;
   }).join('');
   $(`cs-${stepIndex}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  // Load timers for current step
+  loadStepTimers(allSteps[stepIndex] || '');
+}
+
+// ── TIMER FUNCTIONS ──────────────────────────────────────
+
+function parseTimesFromStep(text) {
+  // Match patterns like: 10 minutes, 2 mins, 1 hour, 90 seconds,
+  // 2 to 2½ hours, 1-2 hours (take the max of ranges)
+  const patterns = [
+    // range: "2 to 2½ hours" or "1-2 minutes"
+    /(\d+(?:\.\d+)?)\s*(?:to|-)\s*(\d+(?:[½])?)\s*(hour|hr|minute|min|second|sec)s?/gi,
+    // simple: "10 minutes"
+    /(\d+(?:\.\d+)?)\s*(hour|hr|minute|min|second|sec)s?/gi,
+  ];
+
+  const found = [];
+  let match;
+
+  // First pass: ranges — take the higher value
+  const rangeRe = /(\d+(?:\.\d+)?)\s*(?:to|-)\s*(\d+(?:[½])?)\s*(hour|hr|minute|min|second|sec)s?/gi;
+  const usedRanges = [];
+  while ((match = rangeRe.exec(text)) !== null) {
+    const val2 = parseFloat(match[2].replace('½', '.5'));
+    const unit = match[3].toLowerCase();
+    let secs = val2;
+    if (unit.startsWith('hour') || unit.startsWith('hr')) secs = val2 * 3600;
+    else if (unit.startsWith('min')) secs = val2 * 60;
+    found.push({ seconds: Math.round(secs), label: match[0].trim(), start: match.index });
+    usedRanges.push([match.index, match.index + match[0].length]);
+  }
+
+  // Second pass: simple times — skip positions covered by ranges
+  const simpleRe = /(\d+(?:\.\d+)?)\s*(hour|hr|minute|min|second|sec)s?/gi;
+  while ((match = simpleRe.exec(text)) !== null) {
+    const inRange = usedRanges.some(([s, e]) => match.index >= s && match.index < e);
+    if (inRange) continue;
+    const val = parseFloat(match[1]);
+    const unit = match[2].toLowerCase();
+    let secs = val;
+    if (unit.startsWith('hour') || unit.startsWith('hr')) secs = val * 3600;
+    else if (unit.startsWith('min')) secs = val * 60;
+    if (secs >= 5) { // ignore tiny times < 5 seconds
+      found.push({ seconds: Math.round(secs), label: match[0].trim(), start: match.index });
+    }
+  }
+
+  // Sort by position in text (sequential order)
+  found.sort((a, b) => a.start - b.start);
+  return found;
+}
+
+function formatTime(secs) {
+  if (secs >= 3600) {
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    const s = secs % 60;
+    return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  }
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${m}:${String(s).padStart(2,'0')}`;
+}
+
+function beepDone() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [0, 0.3, 0.6].forEach(delay => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.4, ctx.currentTime + delay);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.25);
+      osc.start(ctx.currentTime + delay);
+      osc.stop(ctx.currentTime + delay + 0.25);
+    });
+  } catch(e) {}
+  // Flash screen
+  const flash = document.createElement('div');
+  flash.style.cssText = 'position:fixed;inset:0;background:rgba(255,255,255,.6);z-index:9999;pointer-events:none;';
+  document.body.appendChild(flash);
+  setTimeout(() => flash.remove(), 400);
+}
+
+function updateTimerUI() {
+  const el = $('pf-timer');
+  const timeEl = $('pf-timer-time');
+  const queueEl = $('pf-timer-queue');
+  const badgeEl = $('pf-timer-badge');
+
+  if (stepTimers.length === 0) {
+    el.classList.remove('active');
+    $('pf-palm-hint').style.display = 'none';
+    return;
+  }
+
+  el.classList.add('active');
+  $('pf-palm-hint').style.display = '';
+
+  if (timerActive) {
+    timeEl.textContent = formatTime(timerRemaining);
+    timeEl.className = timerRemaining <= 10 ? 'urgent' : '';
+    const remaining = stepTimers.length - timerQueueIdx - 1;
+    queueEl.textContent = remaining > 0 ? `+${remaining} more timer${remaining>1?'s':''}` : '';
+    badgeEl.style.display = 'none';
+  } else {
+    // Idle — show next timer ready
+    const next = stepTimers[timerQueueIdx];
+    if (next) {
+      timeEl.className = '';
+      timeEl.textContent = formatTime(next.seconds);
+      $('pf-timer-label').textContent = `⏱ Timer ${timerQueueIdx + 1} of ${stepTimers.length}`;
+      const remaining = stepTimers.length - timerQueueIdx - 1;
+      queueEl.textContent = remaining > 0
+        ? `Next: ${stepTimers[timerQueueIdx + 1]?.label}` : '';
+      badgeEl.style.display = '';
+    } else {
+      // All timers done
+      $('pf-timer-label').textContent = '✅ All timers done';
+      timeEl.textContent = '';
+      queueEl.textContent = '';
+      badgeEl.style.display = 'none';
+    }
+  }
+}
+
+function startNextTimer() {
+  if (timerQueueIdx >= stepTimers.length) return;
+  const timer = stepTimers[timerQueueIdx];
+  timerRemaining = timer.seconds;
+  timerActive = true;
+  $('pf-timer-label').textContent = `⏱ ${timer.label}`;
+  badgeEl_hidden();
+  if (timerInterval) clearInterval(timerInterval);
+  timerInterval = setInterval(() => {
+    timerRemaining--;
+    updateTimerUI();
+    if (timerRemaining <= 0) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+      timerActive = false;
+      beepDone();
+      timerQueueIdx++;
+      updateTimerUI();
+      showToast(timerQueueIdx < stepTimers.length
+        ? `⏱ Timer done! 🖐 Open palm to start next timer.`
+        : '⏱ All timers done!');
+    }
+  }, 1000);
+  updateTimerUI();
+}
+
+function badgeEl_hidden() {
+  const b = $('pf-timer-badge');
+  if (b) b.style.display = 'none';
+}
+
+function loadStepTimers(stepText) {
+  // Reset timer state for new step
+  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+  timerActive = false;
+  timerQueueIdx = 0;
+  timerRemaining = 0;
+  palmHoldStart = null;
+  stepTimers = parseTimesFromStep(stepText);
+  $('pf-timer-label').textContent = stepTimers.length > 0
+    ? `⏱ Timer 1 of ${stepTimers.length}` : '⏱ Timer';
+  updateTimerUI();
 }
 
 function advanceStep() {
@@ -1191,6 +1446,9 @@ $('cook-back').addEventListener('click', () => {
   stopGestureLoop();
   $('pf-gesture-hint').style.display = 'none';
   currentRecipe = null; stepIndex = 0; allSteps = []; frameBuf.length = 0; debouncing = false;
+  stepTimers = []; timerQueueIdx = 0; timerActive = false;
+  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+  $('pf-timer').classList.remove('active');
   show('state-discovery');
 });
 $('disc-pantry-btn').addEventListener('click',  () => { renderPantry(); show('state-pantry'); });
