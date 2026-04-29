@@ -1,5 +1,4 @@
-export default async function handler(req, res) {
-  // CORS preflight
+module.exports = async function handler(req, res) {
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -59,7 +58,7 @@ If no food is found in the input, return: {"searchTerm": null}`;
       }
 
       const data = await response.json();
-      const raw  = data.content[0].text.trim()
+      const raw = data.content[0].text.trim()
         .replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
       const parsed = JSON.parse(raw);
       return res.status(200).json({ searchTerm: parsed.searchTerm || null });
@@ -102,7 +101,7 @@ Realistic per-serving estimates, integers only. Calories for one person should b
       if (!response.ok) return res.status(200).json({ macros: null });
 
       const data = await response.json();
-      const raw  = data.content[0].text.trim()
+      const raw = data.content[0].text.trim()
         .replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
       const macros = JSON.parse(raw);
       return res.status(200).json({ macros });
@@ -112,5 +111,5 @@ Realistic per-serving estimates, integers only. Calories for one person should b
     }
   }
 
-  return res.status(400).json({ error: 'Unknown task. Use task: "parse" or "nutrition".' });
-}
+  return res.status(400).json({ error: 'Unknown task.' });
+};
