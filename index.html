@@ -383,8 +383,8 @@
     <div style="text-align:left;font-size:.85rem;color:#64748b;line-height:2;">
       <div>👇 <strong style="color:#0f172a;">Point finger down</strong> — next step</div>
       <div>☝️ <strong style="color:#0f172a;">Point finger up</strong> — previous step</div>
+      <div>🖐 <strong style="color:#0f172a;">Open palm (hold 0.8s)</strong> — start timer</div>
       <div>👍 <strong style="color:#0f172a;">Thumbs up (hold 1s)</strong> — save recipe</div>
-      <div id="pf-palm-hint" style="display:none;">🖐 <strong style="color:#0f172a;">Open palm (hold .8s)</strong> — start timer</div>
     </div>
     <p style="font-size:.73rem;color:#9ca3af;margin:.85rem 0 0;">(tap anywhere to close)</p>
   </div>
@@ -1005,7 +1005,7 @@ function startGestureLoop() {
           lm[12].y < lm[9].y  - 0.06 &&
           lm[16].y < lm[13].y - 0.06 &&
           lm[20].y < lm[17].y - 0.06 &&
-          lm[4].x  < lm[3].x  - 0.04; // thumb spread
+          Math.abs(lm[4].x - lm[3].x) > 0.04; // thumb spread (works both hands)
         if (allExtended && !debouncing) {
           if (!palmHoldStart) {
             palmHoldStart = now;
@@ -1223,12 +1223,12 @@ function updateTimerUI() {
 
   if (stepTimers.length === 0) {
     el.classList.remove('active');
-    $('pf-palm-hint').style.display = 'none';
+    
     return;
   }
 
   el.classList.add('active');
-  $('pf-palm-hint').style.display = '';
+  
 
   if (timerActive) {
     timeEl.textContent = formatTime(timerRemaining);
