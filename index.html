@@ -160,8 +160,6 @@
 </div>
 <div class="gesture-label" id="gesture-label"></div>
 
-
-
 <!-- ══════════════════════════════════════
      STATE 1 — DISCOVERY (Chat)
 ══════════════════════════════════════ -->
@@ -183,6 +181,7 @@
     </div>
     <div style="display:flex;gap:.5rem;">
       <button id="disc-pantry-btn" class="pf-ghost">🧺 My Pantry</button>
+
     </div>
   </header>
 
@@ -404,8 +403,6 @@ let pointUpStart   = null;
 let pointDownStart = null;
 let doneMacroWatcher = null;
 const frameBuf = [];
-
-// ── NO API KEY NEEDED — handled server-side ──
 
 // ── CHAT UI ───────────────────────────────────────────────
 const chatEl    = $('chat-container');
@@ -660,12 +657,7 @@ async function parseIngredients(ingredients, cuisine, spice) {
   const res = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      task: 'parse',
-      ingredients,
-      cuisineCtx,
-      spiceCtx
-    })
+    body: JSON.stringify({ task: 'parse', ingredients, cuisineCtx, spiceCtx })
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
@@ -683,11 +675,7 @@ async function estimateNutrition(meal) {
   const res = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      task: 'nutrition',
-      mealName: meal.strMeal,
-      ingList
-    })
+    body: JSON.stringify({ task: 'nutrition', mealName: meal.strMeal, ingList })
   });
   if (!res.ok) return null;
   const data = await res.json();
@@ -1221,10 +1209,8 @@ const delay      = ms => new Promise(r => setTimeout(r, ms));
 const pickRandom = arr => arr[Math.floor(Math.random() * arr.length)];
 
 // ── BOOT ──────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
-  initDiscovery();
-  show('state-discovery');
-});
+initDiscovery(); show('state-discovery');
+
 </script>
 </body>
 </html>
