@@ -160,44 +160,7 @@
 </div>
 <div class="gesture-label" id="gesture-label"></div>
 
-<!-- ══════════════════════════════════════
-     STATE 0 — API KEY GATE
-══════════════════════════════════════ -->
-<div id="state-gate" class="pf-state" style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1rem;">
-  <div class="pf-fade" style="max-width:420px;width:100%;background:#ffffff;border:1px solid #dde9ff;border-radius:22px;padding:2.5rem;">
 
-    <!-- Logo -->
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:1.75rem;">
-      <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
-        <path d="M7 14 C12 3, 27 3, 37 11" stroke="#2563eb" stroke-width="3.5" stroke-linecap="round"/>
-        <circle cx="20" cy="25" r="13" stroke="#2563eb" stroke-width="1.4"/>
-        <line x1="20" y1="12" x2="31.3" y2="31.5" stroke="#2563eb" stroke-width="1.1"/>
-        <line x1="31.3" y1="18.5" x2="20" y2="38" stroke="#2563eb" stroke-width="1.1"/>
-        <line x1="31.3" y1="31.5" x2="8.7" y2="31.5" stroke="#2563eb" stroke-width="1.1"/>
-        <line x1="20" y1="38" x2="8.7" y2="18.5" stroke="#2563eb" stroke-width="1.1"/>
-        <line x1="8.7" y1="31.5" x2="20" y2="12" stroke="#2563eb" stroke-width="1.1"/>
-        <line x1="8.7" y1="18.5" x2="31.3" y2="18.5" stroke="#2563eb" stroke-width="1.1"/>
-        <circle cx="20" cy="25" r="4.5" stroke="#2563eb" stroke-width="1.3"/>
-      </svg>
-      <div>
-        <div style="font-size:1.2rem;font-weight:700;color:#0f172a;letter-spacing:-.02em;">PantryFlow</div>
-        <div style="font-size:.7rem;color:#64748b;letter-spacing:.05em;">AI TOUCHLESS SOUS-CHEF</div>
-      </div>
-    </div>
-
-    <h1 style="font-size:1.55rem;font-weight:700;color:#0f172a;margin:0 0 .55rem;">Hello, Chef 👋</h1>
-    <p style="font-size:.875rem;color:#64748b;line-height:1.65;margin:0 0 1.5rem;">
-      Paste your Anthropic API key to get started. It is only saved in this browser tab — sent directly to Anthropic, nowhere else.
-    </p>
-
-    <input id="gate-key-input" type="password" placeholder="sk-ant-..."
-      style="width:100%;background:#eef3ff;border:1px solid #dde9ff;border-radius:12px;padding:.75rem 1rem;font-size:.9rem;color:#0f172a;margin-bottom:.75rem;display:block;"/>
-    <div id="gate-error" style="display:none;color:#f87171;font-size:.8rem;margin-bottom:.75rem;"></div>
-
-    <button id="gate-submit" class="pf-btn" style="width:100%;font-size:.95rem;">Start Cooking</button>
-    <p style="margin-top:1rem;font-size:.75rem;color:#9ca3af;text-align:center;">🔒 Your key never touches our servers.</p>
-  </div>
-</div>
 
 <!-- ══════════════════════════════════════
      STATE 1 — DISCOVERY (Chat)
@@ -220,7 +183,6 @@
     </div>
     <div style="display:flex;gap:.5rem;">
       <button id="disc-pantry-btn" class="pf-ghost">🧺 My Pantry</button>
-      <button id="disc-change-key" class="pf-ghost">Change Key</button>
     </div>
   </header>
 
@@ -443,24 +405,7 @@ let pointDownStart = null;
 let doneMacroWatcher = null;
 const frameBuf = [];
 
-// ── API KEY ───────────────────────────────────────────────
-const getKey  = () => sessionStorage.getItem('pf_key') || '';
-const setKey  = k  => sessionStorage.setItem('pf_key', k);
-const clearKey = () => sessionStorage.removeItem('pf_key');
-
-$('gate-submit').addEventListener('click', handleGateSubmit);
-$('gate-key-input').addEventListener('keydown', e => { if (e.key === 'Enter') handleGateSubmit(); });
-$('gate-key-input').addEventListener('input', () => { $('gate-error').style.display = 'none'; });
-
-function handleGateSubmit() {
-  const val = $('gate-key-input').value.trim().replace(/\s+/g, '');
-  if (!val) { showGateErr('Please paste your Anthropic API key.'); return; }
-  setKey(val);
-  initDiscovery();
-  show('state-discovery');
-}
-function showGateErr(m) { $('gate-error').textContent = m; $('gate-error').style.display = 'block'; }
-$('disc-change-key').addEventListener('click', () => { clearKey(); $('gate-key-input').value = ''; show('state-gate'); });
+// ── NO API KEY NEEDED — handled server-side ──
 
 // ── CHAT UI ───────────────────────────────────────────────
 const chatEl    = $('chat-container');
@@ -712,30 +657,14 @@ async function parseIngredients(ingredients, cuisine, spice) {
   const cuisineCtx = cuisine === 'any' ? 'any cuisine works' : `strongly prefer ${cuisine} cuisine`;
   const spiceCtx   = spice   === 'any' ? 'any spice level'   : `prefers ${spice} food`;
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await fetch('/api/chat', {
     method: 'POST',
-    headers: {
-      'x-api-key': getKey(),
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 60,
-      system: `You are a culinary AI for a recipe discovery app backed by an English-language recipe database.
-Given the user's ingredients and preferences, return the best English recipe search term (1-3 words).
-RULE: The search term MUST always be in English — never output words in any other language.
-Cuisine preference: ${cuisineCtx}. Spice preference: ${spiceCtx}.
-Return ONLY valid JSON with no markdown: {"searchTerm": "fried chicken"}
-Use the cuisine preference to pick a fitting dish style, but always name it in English:
-- chicken + Indonesian/Malaysian → "fried chicken" or "chicken soup"
-- chicken + Indian               → "butter chicken" or "chicken curry"
-- pasta + Italian                → "spaghetti carbonara"
-- beef + Mexican                 → "beef tacos"
-- vegetables + Asian             → "vegetable stir fry"
-If no food is found in the input, return: {"searchTerm": null}`,
-      messages: [{ role: 'user', content: ingredients }]
+      task: 'parse',
+      ingredients,
+      cuisineCtx,
+      spiceCtx
     })
   });
   if (!res.ok) {
@@ -743,8 +672,7 @@ If no food is found in the input, return: {"searchTerm": null}`,
     throw new Error(`HTTP ${res.status}: ${body.slice(0, 120)}`);
   }
   const data = await res.json();
-  const parsed = parseJSON(data.content[0].text);
-  return parsed.searchTerm || null;
+  return data.searchTerm || null;
 }
 
 // ── ANTHROPIC: NUTRITION ESTIMATOR ───────────────────────
@@ -752,29 +680,18 @@ async function estimateNutrition(meal) {
   const ingList = parseIngredientList(meal)
     .map(({ ing, meas }) => `${meas} ${ing}`.trim()).join(', ');
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await fetch('/api/chat', {
     method: 'POST',
-    headers: {
-      'x-api-key': getKey(),
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 80,
-      system: `You are a nutritionist. The ingredients listed are for the FULL recipe batch (typically 4 servings).
-Estimate macronutrients for ONE average serving (divide total by servings).
-Typical serving sizes: fried chicken 1-2 pieces, pasta 200g, soup 300ml, curry with rice 350g.
-Return ONLY valid JSON with no markdown:
-{"calories":450,"protein_g":32,"carbs_g":45,"fat_g":14,"fiber_g":5}
-Realistic per-serving estimates, integers only. Calories for one person should be 300–900 kcal for most meals.`,
-      messages: [{ role: 'user', content: `Recipe: ${meal.strMeal}\nFull recipe ingredients (for whole batch): ${ingList}` }]
+      task: 'nutrition',
+      mealName: meal.strMeal,
+      ingList
     })
   });
   if (!res.ok) return null;
   const data = await res.json();
-  return parseJSON(data.content[0].text);
+  return data.macros || null;
 }
 
 // ── THEMEALDB ─────────────────────────────────────────────
@@ -1304,8 +1221,7 @@ const delay      = ms => new Promise(r => setTimeout(r, ms));
 const pickRandom = arr => arr[Math.floor(Math.random() * arr.length)];
 
 // ── BOOT ──────────────────────────────────────────────────
-if (getKey()) { initDiscovery(); show('state-discovery'); }
-else           { show('state-gate'); }
+initDiscovery(); show('state-discovery');
 </script>
 </body>
 </html>
